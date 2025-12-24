@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>台北女青資產標籤生成系統</title>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.rawgit.com/davidshimjs/qrcodejs/gh-pages/qrcode.min.js"></script>
+    <style>
+        :root {
+            /* 基礎紙張與物理參數 - 由 JS 即時覆蓋 */
+            --top-m: 1.35cm; --side-m: 1.5cm; 
+            --lbl-w: 4.5cm; --lbl-h: 1.5cm;
+            --h-pitch: 4.5cm; --v-pitch: 1.5cm;
+            --col-count: 4; --row-count: 18;
+
+            /* 內容樣式變數 */
+            --fs-title: 8.5pt; --mv-title: 0mm; --mh-title: 0mm;
+            --fs-id: 6pt; --mv-id: 0mm; --mh-id: 0mm;
+            --fs-name: 6pt; --mv-name: 0mm; --mh-name: 0mm;
+            --fs-loc: 6pt; --mv-loc: 0mm; --mh-loc: 0mm;
+            --size-qr: 42px; --mv-qr: 0mm; --mh-qr: 0mm;
+
+            --bg: #0d1117; --card: #161b22; --accent: #58a6ff; --text: #c9d1d9;
+        }
+
+        body { font-family: "Inter", "PingFang TC", sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        
+        /* 控制面板區 */
+        .sidebar { 
+            width: 380px; background: var(--card); border-right: 1px solid #30363d; 
+            padding: 20px; box-sizing: border-box; display: flex; flex-direction: column; gap: 15px; overflow-y: auto;
+        }
+        .header-box h1 { font-size: 18px; margin: 0; color: #fff; border-left: 4px solid var(--accent); padding-left: 10px; }
+        
+        .config-section { background: rgba(0,0,0,0.2); border-radius: 10px; padding: 12px; border: 1px solid #30363d; }
+        .section-h { font-size: 11px; font-weight: bold; color: var(--accent); margin-bottom: 10px; border-bottom: 1px solid #30363d; padding-bottom: 5px; }
+        
+        .input-item { margin-bottom: 8px; }
+        .input-item label { font-size: 10px; color: #8b949e; display: block; margin-bottom: 3px; }
+        
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; }
+        
+        input, select { background: #0d1117; border: 1px solid #30363d; color: #fff; padding: 6px; border-radius: 4px; font-size: 11px; width: 100%; box-sizing: border-box; }
+        input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px rgba(88,166,255,0.2); }
+
+        .btn-print { background: #238636; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn-print:hover { background: #2ea043; transform: translateY(-1px); }
+
+        /* 右側預覽區 */
+        .main-view { flex: 1; overflow-y: auto; padding: 40px; background: #010409; display: flex; flex-direction: column; align-items: center; }
+        
+        .page {
+            width: 210mm; height: 297mm; background: white; 
+            padding-top: var(--top-m); padding-left: var(--side-m);
+            display: grid; 
+            grid-template-columns: repeat(var(--col-count), var(--h-pitch));
+            grid-auto-rows: var(--v-pitch);
+            box-sizing: border-box; page-break-after: always; flex-shrink: 0; margin-bottom: 30px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        /* 標籤設計 */
+        .label-card { 
+            width: var(--lbl-w); height: var(--lbl-h); 
+            padding: 1mm; box-sizing: border-box; overflow: hidden; 
+        }
+        .label-inner { height: 100%; border: 0.7px solid #000; border-radius: 1.2mm; display: flex; background: #fff; color: #000; }
+        .side-bar { width: 1.5mm; background: #000; flex-shrink: 0; }
+        .label-main { flex: 1; padding: 0.5mm 1.5mm; display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
+        
+        .t-title { font-size: var(--fs-title); font-weight: 900; border-bottom: 0.8px solid #000; margin-bottom: 1px; transform: translate(var(--mh-title), var(--mv-title)); }
+        .t-row { font-weight: 600; white-space: nowrap; }
+        .t-id { font-size: var(--fs-id); transform: translate(var(--mh-id), var(--mv-id)); }
+        .t-name { font-size: var(--fs-name); transform: translate(var(--mh-name), var(--mv-name)); }
+        .t-loc { font-size: var(--fs-loc); transform: translate(var(--mh-loc), var(--mv-loc)); }
+        
+        .qr-wrap { 
+            width: 13mm; display: flex; align-items: center; justify-content: center; padding-right: 1mm;
+            transform: translate(var(--mh-qr), var(--mv-qr)); 
+        }
+        .qr-wrap canvas, .qr-wrap img { width: var(--size-qr) !important; height: var(--size-qr) !important; }
+
+        @media print {
+            .sidebar { display: none; }
+            .main-view { padding: 0; background: white; overflow: visible; }
+            .page { margin: 0; box-shadow: none; }
+            @page { size: A4; margin: 0; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <div class="header-box">
+        <h1>台北女青資產標籤系統</h1>
+        <p>澤璿 製作</p>
+    </div>
+
+    <button class="btn-print" onclick="window.print()">列印/導出 PDF</button>
+
+    <div class="config-section">
+        <div class="section-h">📏 1. 紙張物理規格 (cm)</div>
+        <div class="input-item"><label>上傳 Excel</label><input type="file" id="fileInput" accept=".xlsx, .xls"></div>
+        <div class="grid-2">
+            <div class="input-item"><label>上邊界</label><input type="number" id="p-tm" value="1.35" step="0.01" oninput="fullRender()"></div>
+            <div class="input-item"><label>側邊界</label><input type="number" id="p-sm" value="1.50" step="0.01" oninput="fullRender()"></div>
+        </div>
+        <div class="grid-2">
+            <div class="input-item"><label>標籤寬度</label><input type="number" id="p-lw" value="4.50" step="0.01" oninput="fullRender()"></div>
+            <div class="input-item"><label>標籤高度</label><input type="number" id="p-lh" value="1.50" step="0.01" oninput="fullRender()"></div>
+        </div>
+        <div class="grid-2">
+            <div class="input-item"><label>水平點數(間距)</label><input type="number" id="p-hp" value="4.50" step="0.01" oninput="fullRender()"></div>
+            <div class="input-item"><label>垂直點數(間距)</label><input type="number" id="p-vp" value="1.50" step="0.01" oninput="fullRender()"></div>
+        </div>
+        <div class="grid-2">
+            <div class="input-item"><label>橫向數目(列)</label><input type="number" id="p-cn" value="4" oninput="fullRender()"></div>
+            <div class="input-item"><label>縱向數目(行)</label><input type="number" id="p-rn" value="18" oninput="fullRender()"></div>
+        </div>
+    </div>
+
+    <div class="config-section">
+        <div class="section-h">🔗 2. 數據對應</div>
+        <div class="input-item"><label>主標題</label><select id="map1" onchange="fullRender()"></select></div>
+        <div class="input-item"><label style="color:var(--accent)">QR Code 數據源</label><select id="mapQR" onchange="fullRender()"></select></div>
+        <div class="grid-3">
+            <select id="map2" onchange="fullRender()"></select>
+            <select id="map3" onchange="fullRender()"></select>
+            <select id="map4" onchange="fullRender()"></select>
+        </div>
+    </div>
+
+    <div class="config-section">
+        <div class="section-h">🎯 3. 欄位微調 (字級 / 上下 / 左右)</div>
+        <div class="input-item"><label>主標題</label>
+            <div class="grid-3"><input type="number" id="fs-title" value="8.5" step="0.5" oninput="liveUpdate()"><input type="number" id="mv-title" value="0" step="0.1" oninput="liveUpdate()"><input type="number" id="mh-title" value="0" step="0.1" oninput="liveUpdate()"></div>
+        </div>
+        <div class="input-item"><label>資產編號</label>
+            <div class="grid-3"><input type="number" id="fs-id" value="6" oninput="liveUpdate()"><input type="number" id="mv-id" value="0" oninput="liveUpdate()"><input type="number" id="mh-id" value="0" oninput="liveUpdate()"></div>
+        </div>
+        <div class="input-item"><label>資產名稱</label>
+            <div class="grid-3"><input type="number" id="fs-name" value="6" oninput="liveUpdate()"><input type="number" id="mv-name" value="0" oninput="liveUpdate()"><input type="number" id="mh-name" value="0" oninput="liveUpdate()"></div>
+        </div>
+        <div class="input-item"><label>資產地點</label>
+            <div class="grid-3"><input type="number" id="fs-loc" value="6" oninput="liveUpdate()"><input type="number" id="mv-loc" value="0" oninput="liveUpdate()"><input type="number" id="mh-loc" value="0" oninput="liveUpdate()"></div>
+        </div>
+        <div class="input-item"><label style="color:var(--accent)">QR Code 尺寸/上下/左右</label>
+            <div class="grid-3"><input type="number" id="size-qr" value="42" oninput="liveUpdate()"><input type="number" id="mv-qr" value="0" step="0.1" oninput="liveUpdate()"><input type="number" id="mh-qr" value="0" step="0.1" oninput="liveUpdate()"></div>
+        </div>
+    </div>
+</div>
+
+<div class="main-view" id="printContainer">
+    <div style="color:#484f58; margin-top:200px; text-align: center;">
+        <p>請先上傳 Excel 檔案</p>
+    </div>
+</div>
+
+<script>
+    let rawData = [];
+
+    document.getElementById('fileInput').onchange = (e) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const wb = XLSX.read(new Uint8Array(ev.target.result), {type: 'array'});
+            rawData = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+            const heads = Object.keys(rawData[0]);
+            ['map1','map2','map3','map4','mapQR'].forEach(id => {
+                const s = document.getElementById(id); s.innerHTML = '';
+                heads.forEach(h => s.add(new Option(h, h)));
+            });
+            fullRender();
+        };
+        reader.readAsArrayBuffer(e.target.files[0]);
+    };
+
+    function liveUpdate() {
+        const r = document.documentElement;
+        // 物理參數連動
+        r.style.setProperty('--top-m', document.getElementById('p-tm').value + 'cm');
+        r.style.setProperty('--side-m', document.getElementById('p-sm').value + 'cm');
+        r.style.setProperty('--lbl-w', document.getElementById('p-lw').value + 'cm');
+        r.style.setProperty('--lbl-h', document.getElementById('p-lh').value + 'cm');
+        r.style.setProperty('--h-pitch', document.getElementById('p-hp').value + 'cm');
+        r.style.setProperty('--v-pitch', document.getElementById('p-vp').value + 'cm');
+        r.style.setProperty('--col-count', document.getElementById('p-cn').value);
+
+        // 字體與位移連動
+        const keys = ['title', 'id', 'name', 'loc'];
+        keys.forEach(k => {
+            r.style.setProperty(`--fs-${k}`, document.getElementById(`fs-${k}`).value + 'pt');
+            r.style.setProperty(`--mv-${k}`, document.getElementById(`mv-${k}`).value + 'mm');
+            r.style.setProperty(`--mh-${k}`, document.getElementById(`mh-${k}`).value + 'mm');
+        });
+        r.style.setProperty('--size-qr', document.getElementById('size-qr').value + 'px');
+        r.style.setProperty('--mv-qr', document.getElementById('mv-qr').value + 'mm');
+        r.style.setProperty('--mh-qr', document.getElementById('mh-qr').value + 'mm');
+    }
+
+    function fullRender() {
+        if (rawData.length === 0) return;
+        liveUpdate();
+        
+        const container = document.getElementById('printContainer');
+        container.innerHTML = '';
+        
+        const m = { t: map1.value, id: map2.value, n: map3.value, l: map4.value, qr: mapQR.value };
+        const cn = parseInt(document.getElementById('p-cn').value);
+        const rn = parseInt(document.getElementById('p-rn').value);
+        const itemsPerPage = cn * rn;
+
+        rawData.forEach((row, i) => {
+            if (i % itemsPerPage === 0) {
+                const p = document.createElement('div'); p.className = 'page';
+                container.appendChild(p);
+            }
+            const card = document.createElement('div');
+            card.className = 'label-card';
+            card.innerHTML = `
+                <div class="label-inner">
+                    <div class="side-bar"></div>
+                    <div class="label-main">
+                        <div class="t-title">${row[m.t] || ''}</div>
+                        <div class="t-row t-id">編號: ${row[m.id] || ''}</div>
+                        <div class="t-row t-name">名稱: ${row[m.n] || ''}</div>
+                        <div class="t-row t-loc">地點: ${row[m.l] || ''}</div>
+                    </div>
+                    <div class="qr-wrap" id="qr-${i}"></div>
+                </div>
+            `;
+            container.lastChild.appendChild(card);
+            
+            if (row[m.qr]) {
+                new QRCode(document.getElementById(`qr-${i}`), {
+                    text: String(row[m.qr]),
+                    width: 100, height: 100,
+                    correctLevel: QRCode.CorrectLevel.L
+                });
+            }
+        });
+    }
+</script>
+</body>
+</html>
